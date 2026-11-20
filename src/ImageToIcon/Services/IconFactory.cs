@@ -420,28 +420,40 @@ public static class IconFactory
 
     public static void SaveHicolorFolder(IEnumerable<SKBitmap> images, string directory, string baseName)
     {
+        var name = SafeBaseName(baseName);
         foreach (var (size, png) in EncodeHicolorFrames(images))
         {
             var dir = Path.Combine(directory, $"{size}x{size}", "apps");
             Directory.CreateDirectory(dir);
-            File.WriteAllBytes(Path.Combine(dir, baseName + ".png"), png);
+            File.WriteAllBytes(Path.Combine(dir, name + ".png"), png);
         }
     }
 
     public static void SaveHicolorArchive(IEnumerable<SKBitmap> images, string path, string baseName)
     {
+        var name = SafeBaseName(baseName);
         using var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
         using var gz = new GZipStream(fs, CompressionLevel.Optimal);
         using var tar = new TarWriter(gz, TarEntryFormat.Ustar);
         foreach (var (size, png) in EncodeHicolorFrames(images))
         {
-            var entry = new UstarTarEntry(TarEntryType.RegularFile, $"hicolor/{size}x{size}/apps/{baseName}.png")
+            var entry = new UstarTarEntry(TarEntryType.RegularFile, $"hicolor/{size}x{size}/apps/{name}.png")
             {
                 DataStream = new MemoryStream(png),
                 Mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead
             };
             tar.WriteEntry(entry);
         }
+    }
+
+    /// Names end up as a path segment or tar entry name. Separators (also backslash, which is a
+    /// legal filename character on Linux but a separator on Windows) and control characters are
+    /// replaced, and names that resolve to a relative path component fall back to a fixed name.
+    private static string SafeBaseName(string baseName)
+    {
+        var chars = baseName.Select(c => c is '/' or '\\' or ':' || char.IsControl(c) ? '_' : c).ToArray();
+        var name = new string(chars).Trim();
+        return name is "" or "." or ".." ? "icon" : name;
     }
 
     private static IEnumerable<(int Size, byte[] Png)> EncodeHicolorFrames(IEnumerable<SKBitmap> images)

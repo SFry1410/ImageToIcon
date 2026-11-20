@@ -32,7 +32,27 @@ public static class PnmDecoder
             pos++;
         }
 
-        var pixels = new byte[(long)width * height * 4];
+        if (!DecodeLimits.PixelCountAllowed(width, height))
+            return null;
+
+        // Reject before allocating: every pixel needs at least a minimum number of source bytes.
+        // Binary: exact size. ASCII: one digit per sample plus a separator between samples
+        // (the last sample may end at EOF without one, hence -1).
+        long pixelCount = (long)width * height;
+        long minBytes = magic switch
+        {
+            '1' => pixelCount * 2 - 1,
+            '2' => pixelCount * 2 - 1,
+            '3' => pixelCount * 6 - 1,
+            '4' => (long)((width + 7) / 8) * height,
+            '5' => pixelCount * (maxVal > 255 ? 2 : 1),
+            '6' => pixelCount * 3 * (maxVal > 255 ? 2 : 1),
+            _ => long.MaxValue
+        };
+        if (data.Length - pos < minBytes)
+            return null;
+
+        var pixels = new byte[pixelCount * 4];
         return magic switch
         {
             '1' => ReadAsciiBitmap(data, pos, width, height, pixels),

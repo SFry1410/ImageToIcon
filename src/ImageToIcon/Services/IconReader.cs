@@ -64,6 +64,7 @@ public static class IconReader
 
         foreach (var (w, h, size, offset) in entries)
         {
+            if (size == 0 || size > MaxIconBytes) continue;
             ms.Seek(offset, SeekOrigin.Begin);
             var data = br.ReadBytes((int)size);
             if (data.Length == 0) continue;
@@ -189,6 +190,7 @@ public static class IconReader
         var iconDataById = new Dictionary<uint, byte[]>();
         foreach (var leaf in CollectByType(br, fs, rsrcRaw, 3)) // RT_ICON
         {
+            if (leaf.Size == 0 || leaf.Size > MaxIconBytes) continue;
             fs.Seek(RvaToFile(leaf.DataRva), SeekOrigin.Begin);
             iconDataById[leaf.Id] = br.ReadBytes((int)leaf.Size);
         }
@@ -197,6 +199,7 @@ public static class IconReader
 
         foreach (var group in CollectByType(br, fs, rsrcRaw, 14)) // RT_GROUP_ICON
         {
+            if (group.Size == 0 || group.Size > MaxIconBytes) continue;
             fs.Seek(RvaToFile(group.DataRva), SeekOrigin.Begin);
             var built = BuildIcoFromGroup(br.ReadBytes((int)group.Size), iconDataById);
             if (built != null) return built;
@@ -304,6 +307,18 @@ public static class IconReader
         return false;
     }
 
+    // A PE resource tree is type → name → language, i.e. three directory levels. Anything deeper
+    // is malformed; a self-referencing entry would otherwise recurse until the stack overflows,
+    // which .NET cannot catch and which terminates the process.
+    private const int MaxResourceDepth = 4;
+
+    // Largest single icon payload we are willing to read. Real icon frames are well under this.
+    private const uint MaxIconBytes = 16 * 1024 * 1024;
+
+    // Upper bound on directory visits per resource walk. Stops fan-out blow-ups (many entries per
+    // level) that depth alone would not prevent.
+    private const int MaxDirectoryVisits = 4096;
+
     private static List<Leaf> CollectByType(BinaryReader br, FileStream fs, long rsrcBase, uint typeId)
     {
         fs.Seek(rsrcBase, SeekOrigin.Begin);
@@ -313,15 +328,21 @@ public static class IconReader
             var n = br.ReadUInt32();
             var d = br.ReadUInt32();
             if ((n & 0x80000000) == 0 && (n & 0x7FFFFFFF) == typeId && (d & 0x80000000) != 0)
-                return WalkSubdir(br, fs, rsrcBase, d & 0x7FFFFFFF, 0);
+            {
+                var budget = MaxDirectoryVisits;
+                return WalkSubdir(br, fs, rsrcBase, d & 0x7FFFFFFF, 0, 1, ref budget);
+            }
         }
 
         return [];
     }
 
-    private static List<Leaf> WalkSubdir(BinaryReader br, FileStream fs, long rsrcBase, long dirOff, uint parentId)
+    private static List<Leaf> WalkSubdir(BinaryReader br, FileStream fs, long rsrcBase, long dirOff, uint parentId, int depth, ref int budget)
     {
         var result = new List<Leaf>();
+        if (depth > MaxResourceDepth || --budget < 0)
+            return result;
+
         fs.Seek(rsrcBase + dirOff, SeekOrigin.Begin);
         ReadDirCounts(br, out var named, out var idCount);
 
@@ -338,7 +359,7 @@ public static class IconReader
             var myId = parentId != 0 ? parentId : id;
             if (isSubdir)
             {
-                result.AddRange(WalkSubdir(br, fs, rsrcBase, offset, myId));
+                result.AddRange(WalkSubdir(br, fs, rsrcBase, offset, myId, depth + 1, ref budget));
                 continue;
             }
 

@@ -32,6 +32,17 @@ public static class RasterDecoder
 
     private static SKBitmap? DecodeViaPfim(string path)
     {
+        // TGA header: width and height are little-endian uint16 at offsets 12 and 14.
+        // Check them before Pfim allocates its pixel buffer from the same values.
+        using (var fs = File.OpenRead(path))
+        {
+            var header = new byte[18];
+            if (fs.Read(header, 0, header.Length) != header.Length) return null;
+            var tgaWidth = header[12] | header[13] << 8;
+            var tgaHeight = header[14] | header[15] << 8;
+            if (!DecodeLimits.PixelCountAllowed(tgaWidth, tgaHeight)) return null;
+        }
+
         using var image = Pfimage.FromFile(path);
         if (image == null) return null;
 
@@ -84,7 +95,7 @@ public static class RasterDecoder
         if (tif == null) return null;
         var w = tif.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
         var h = tif.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
-        if (w <= 0 || h <= 0) return null;
+        if (!DecodeLimits.PixelCountAllowed(w, h)) return null;
 
         var raster = new int[w * h];
         if (!tif.ReadRGBAImage(w, h, raster)) return null;

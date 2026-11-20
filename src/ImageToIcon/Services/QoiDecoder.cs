@@ -23,8 +23,12 @@ public static class QoiDecoder
         var width = ReadUInt32Be(data, 4);
         var height = ReadUInt32Be(data, 8);
         if (width == 0 || height == 0 || width > 0x10000 || height > 0x10000) return null;
+        if (!DecodeLimits.PixelCountAllowed(width, height)) return null;
 
         var pixelCount = (long)width * height;
+        // A single data byte yields at most 62 pixels (QOI_OP_RUN). Anything larger is a forged
+        // header that would only burn CPU and memory before failing on missing data.
+        if (pixelCount > (long)data.Length * 62) return null;
         var bgra = new byte[pixelCount * 4];
         var index = new (byte r, byte g, byte b, byte a)[64];
         byte pr = 0, pg = 0, pb = 0, pa = 255;

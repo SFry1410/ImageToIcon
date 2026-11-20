@@ -88,17 +88,20 @@ public static class SelfUpdater
         if (asset == null)
             throw new IOException("No matching release asset for the installed binaries.");
 
-        var tempDir = Path.Combine(Path.GetTempPath(), $"ImageToIcon-{latest}");
-        if (Directory.Exists(tempDir))
-            Directory.Delete(tempDir, true);
-        Directory.CreateDirectory(tempDir);
+        // Refuse to install anything we cannot verify. The digest comes from the same API
+        // response as the URL, so it only guards against corruption, but missing it means
+        // there is no check at all.
+        if (string.IsNullOrEmpty(asset.Sha256Hex))
+            throw new IOException($"Release asset {asset.Name} has no SHA-256 digest; refusing to install an unverified update.");
+
+        var tempDir = CreatePrivateTempDir();
 
         var zipPath = Path.Combine(tempDir, "update.zip");
         var pct = progress == null ? null : new Progress<double>(p => progress.Report((int)(p * 100)));
         if (!await GitHubClient.DownloadAssetAsync(asset.DownloadUrl, zipPath, pct, ct))
             throw new IOException($"Failed to download {asset.Name}.");
 
-        if (!string.IsNullOrEmpty(asset.Sha256Hex) && !VerifySha256(zipPath, asset.Sha256Hex))
+        if (!VerifySha256(zipPath, asset.Sha256Hex))
         {
             var proceed = onHashMismatch != null && await onHashMismatch(asset.Name, asset.Sha256Hex, zipPath);
             if (!proceed)
@@ -143,9 +146,32 @@ public static class SelfUpdater
         settings.Save();
 
         if (OperatingSystem.IsWindows())
-            ApplyWindows(installDir, replacements, latest);
+            ApplyWindows(installDir, replacements, latest, tempDir);
         else if (OperatingSystem.IsLinux())
-            ApplyLinux(installDir, replacements);
+            ApplyLinux(installDir, replacements, tempDir);
+    }
+
+    /// Fresh, randomly named directory owned by the current user. Predictable paths in the shared
+    /// temp directory would let another local user pre-create or swap files that we then execute.
+    private static string CreatePrivateTempDir()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "ImageToIcon-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        if (OperatingSystem.IsLinux())
+            File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return dir;
+    }
+
+    /// POSIX single-quote escaping: safe for any byte sequence except NUL.
+    private static string ShellQuote(string value)
+    {
+        return "'" + value.Replace("'", "'\\''") + "'";
+    }
+
+    /// Escapes %, which cmd expands even inside double quotes.
+    private static string BatchEscape(string value)
+    {
+        return value.Replace("%", "%%");
     }
 
     private static string ResolveInstallDir()
@@ -201,7 +227,7 @@ public static class SelfUpdater
     }
 
     [SupportedOSPlatform("linux")]
-    private static void ApplyLinux(string installDir, List<(string source, string destName)> replacements)
+    private static void ApplyLinux(string installDir, List<(string source, string destName)> replacements, string workDir)
     {
         var exe = Environment.ProcessPath ?? Path.Combine(installDir, LinuxBinary);
         var script = new StringBuilder();
@@ -210,34 +236,35 @@ public static class SelfUpdater
         foreach (var (source, destName) in replacements)
         {
             var dest = Path.Combine(installDir, destName);
-            script.AppendLine($"cp -f \"{source}\" \"{dest}\"");
+            script.AppendLine($"cp -f {ShellQuote(source)} {ShellQuote(dest)}");
             if (destName == LinuxBinary)
-                script.AppendLine($"chmod +x \"{dest}\"");
+                script.AppendLine($"chmod +x {ShellQuote(dest)}");
         }
 
-        script.AppendLine($"cd \"{installDir}\"");
-        script.AppendLine($"exec \"{exe}\"");
+        script.AppendLine($"cd {ShellQuote(installDir)}");
+        script.AppendLine($"exec {ShellQuote(exe)}");
 
-        var scriptPath = Path.Combine(Path.GetTempPath(), "imagetoicon-restart.sh");
+        var scriptPath = Path.Combine(workDir, "restart.sh");
         File.WriteAllText(scriptPath, script.ToString());
         File.SetUnixFileMode(
             scriptPath,
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 
-        Process.Start(new ProcessStartInfo
+        var psi = new ProcessStartInfo
         {
             FileName = "/bin/sh",
-            Arguments = $"\"{scriptPath}\"",
             UseShellExecute = false,
             CreateNoWindow = true
-        });
+        };
+        psi.ArgumentList.Add(scriptPath);
+        Process.Start(psi);
         Environment.Exit(0);
     }
 
     [SupportedOSPlatform("windows")]
-    private static void ApplyWindows(string installDir, List<(string source, string destName)> replacements, Version version)
+    private static void ApplyWindows(string installDir, List<(string source, string destName)> replacements, Version version, string workDir)
     {
-        var batPath = Path.Combine(Path.GetTempPath(), $"ImageToIcon-update-{version}.bat");
+        var batPath = Path.Combine(workDir, $"update-{version}.bat");
         var exePath = Path.Combine(installDir, WindowsBinary);
         var sb = new StringBuilder();
         sb.AppendLine("@echo off");
@@ -248,10 +275,10 @@ public static class SelfUpdater
         foreach (var (source, destName) in replacements)
         {
             var dest = Path.Combine(installDir, destName);
-            sb.AppendLine($"copy /y \"{source}\" \"{dest}\"");
+            sb.AppendLine($"copy /y \"{BatchEscape(source)}\" \"{BatchEscape(dest)}\"");
         }
 
-        sb.AppendLine($"start \"\" \"{exePath}\"");
+        sb.AppendLine($"start \"\" \"{BatchEscape(exePath)}\"");
         sb.AppendLine("del \"%~f0\"");
         File.WriteAllText(batPath, sb.ToString());
         Process.Start(new ProcessStartInfo(batPath)
