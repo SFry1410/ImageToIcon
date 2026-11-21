@@ -516,9 +516,18 @@
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="16">
                 <CheckBox x:Name="LibraryCheck" Content="Save to icon library" IsVisible="False"
-                          ToolTip.Tip="Store the icon in the system-wide icon library DLL (Windows). Writing requires administrator rights; you will be asked to confirm each time." />
+                          ToolTip.Tip="Store the icon in the icon library DLL (Windows) in the folder shown below. The default folder is private to your account and needs no administrator rights." />
                 <CheckBox x:Name="MacCheck" Content="Also export .icns (Mac)"
                           ToolTip.Tip="Also write a .icns file with the standard Mac sizes into a folder you choose." />
+            </StackPanel>
+            <StackPanel x:Name="LibraryPathRow" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8" IsVisible="False">
+                <TextBlock x:Name="LibraryPathText" VerticalAlignment="Center" MaxWidth="420"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="Folder of the icon library DLL" />
+                <Button x:Name="LibraryPathBtn" Content="Choose folder…"
+                        ToolTip.Tip="Pick the folder that holds your Icons.dll" />
+                <Button x:Name="LibraryResetBtn" Content="Default"
+                        ToolTip.Tip="Use your private default folder again" />
             </StackPanel>
         </StackPanel>
 

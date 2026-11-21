@@ -25,6 +25,8 @@ public class Settings
     public double StrokeOffset { get; set; }
     public bool LibraryEnabled { get; set; }
     public bool MacExport { get; set; }
+    /// Folder of the icon library DLL chosen in the GUI. Empty means the per-user default.
+    public string LibraryPath { get; set; } = "";
     public DateTime LastUpdateCheckUtc { get; set; }
     public string PendingUpdateVersion { get; set; } = "";
 
@@ -105,6 +107,9 @@ public class Settings
 
             if (MacExport != def.MacExport)
                 w.WriteBoolean(nameof(MacExport), MacExport);
+
+            if (!string.IsNullOrEmpty(LibraryPath))
+                w.WriteString(nameof(LibraryPath), LibraryPath);
 
             WriteDouble(w, nameof(CornerRadius), CornerRadius, def.CornerRadius);
             WriteDouble(w, nameof(Padding), Padding, def.Padding, 3);

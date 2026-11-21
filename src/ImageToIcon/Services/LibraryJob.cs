@@ -102,7 +102,7 @@ public static class LibraryJob
             if (spec.Keep is < 1 or > 100)
                 throw new InvalidDataException("Keep must be between 1 and 100.");
 
-            var entry = IconLibraryExporter.AddOrUpdate(new LibraryOptions(LibraryPaths.DefaultDirectory, spec.Keep), spec.Name, icoPath, spec.Source, log);
+            var entry = IconLibraryExporter.AddOrUpdate(new LibraryOptions(LibraryPaths.SystemDirectory, spec.Keep), spec.Name, icoPath, spec.Source, log);
             WriteResult(resultPath, new LibraryJobResult
             {
                 Ok = true,

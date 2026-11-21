@@ -81,9 +81,9 @@ Run `ImageToIcon --help` to see the full list of options, including format, corn
 | `--stroke=#RGBA,width[,offset]` | Stroke — width fraction, offset 0..1. |
 | `--shadow-no-bg` | Shadow ignores background (only with `--bg`). |
 | `--stroke-no-bg` | Stroke ignores background (only with `--bg`). |
-| `--library[=DIR]` | Save into the icon library DLL (Windows). Default `%ProgramData%\ImageToIcon`. See [Icon library](#icon-library). |
+| `--library[=DIR]` | Save into the icon library DLL (Windows). Default `%LocalAppData%\ImageToIcon\Library`, private to your account. See [Icon library](#icon-library). |
 | `--library-keep=N` | Number of old library versions to keep, `1`–`100` (default `5`). |
-| `--elevate` | Update the default library with administrator rights (Windows will ask for confirmation). |
+| `--elevate` | Update the shared library in `%ProgramData%\ImageToIcon` with administrator rights (Windows asks for confirmation). |
 | `--mac` | Also write a `.icns` with the standard Mac sizes. |
 | `--mac-out=DIR` | Output folder for `--mac` (default: `<o>\mac`). |
 | `--help` | Show usage information. |
@@ -102,8 +102,10 @@ ImageToIcon --cli --library --elevate --name=app logo.png
 
 Each run prints two references:
 
-- `C:\ProgramData\ImageToIcon\Icons.dll,-1` — by resource ID. **Use this.** It stays valid when other icons are added or updated.
-- `C:\ProgramData\ImageToIcon\Icons.dll,0` — by position. Only valid while no icon is removed from the library.
+- `<folder>\Icons.dll,-1` — by resource ID. **Use this.** It stays valid when other icons are added or updated.
+- `<folder>\Icons.dll,0` — by position. Only valid while no icon is removed from the library.
+
+`<folder>` is the library folder: `%LocalAppData%\ImageToIcon\Library` by default, or the folder you chose with `--library=DIR` or in the GUI. Every user account has its own DLL by default.
 
 To use one in a shortcut, set `IconLocation` to the ID form.
 
@@ -125,11 +127,13 @@ Only one update runs at a time (a named mutex). A corrupt `Icons.index.json` is 
 
 ### Permissions
 
-The default directory `%ProgramData%\ImageToIcon` is readable by every account and writable only by administrators. Standard users can therefore load the icons but cannot change them without `--elevate`. The GUI asks for confirmation before it elevates.
+No administrator rights are needed for the default: `%LocalAppData%\ImageToIcon\Library` belongs to your account, so each user gets their own DLL. In the GUI, **Choose folder…** selects any folder you can write to, and **Default** switches back to your private folder.
 
-`--elevate` only works for the default directory. The elevated helper runs as the account that confirms the UAC prompt and accepts only job files inside its own temp workspace.
+A shared library in `%ProgramData%\ImageToIcon` is readable by every account and writable only by administrators. Standard users can load those icons but cannot change them without `--elevate`. The GUI asks for confirmation before it elevates.
 
-A user-chosen `--library=DIR` keeps the normal permissions of that folder.
+`--elevate` only works for the shared folder. The elevated helper runs as the account that confirms the UAC prompt and accepts only job files inside its own temp workspace.
+
+A folder you choose keeps its normal permissions.
 
 ### Temporary files
 

@@ -8,8 +8,13 @@ namespace ImageToIcon.Library;
 public static class LibraryPaths
 {
     /// %ProgramData%\ImageToIcon — readable for every account, writable for administrators only.
-    public static string DefaultDirectory =>
+    public static string SystemDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ImageToIcon");
+
+    /// %LocalAppData%\ImageToIcon\Library — private to the current account; no administrator rights needed.
+    /// This is the default for new libraries, so every user gets their own DLL.
+    public static string PerUserDirectory =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ImageToIcon", "Library");
 
     /// Creates the library directory if missing. The system-wide default directory gets
     /// administrator-only write access; standard users keep read and execute access so Explorer can
@@ -24,7 +29,7 @@ public static class LibraryPaths
         try
         {
             Directory.CreateDirectory(dir);
-            if (IsDefaultDirectory(dir))
+            if (IsSystemDirectory(dir))
                 ApplyAcl(dir);
             log.Info($"Created icon library directory '{dir}'.");
         }
@@ -34,11 +39,11 @@ public static class LibraryPaths
         }
     }
 
-    private static bool IsDefaultDirectory(string dir)
+    private static bool IsSystemDirectory(string dir)
     {
         return string.Equals(
             Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar),
-            Path.GetFullPath(DefaultDirectory).TrimEnd(Path.DirectorySeparatorChar),
+            Path.GetFullPath(SystemDirectory).TrimEnd(Path.DirectorySeparatorChar),
             StringComparison.OrdinalIgnoreCase);
     }
 

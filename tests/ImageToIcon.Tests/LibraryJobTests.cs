@@ -63,3 +63,16 @@ public class LibraryJobTests
         }
     }
 }
+
+public class LibraryPathsTests
+{
+    [WindowsFact]
+    public void PerUserDirectory_IsPrivateAndSeparateFromSystemDirectory()
+    {
+        var perUser = LibraryPaths.PerUserDirectory;
+        var system = LibraryPaths.SystemDirectory;
+
+        Assert.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), perUser, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(Path.GetFullPath(system), Path.GetFullPath(perUser));
+    }
+}

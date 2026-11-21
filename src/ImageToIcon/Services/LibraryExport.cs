@@ -24,8 +24,8 @@ public static class LibraryExport
         if (!elevate)
             return IconLibraryExporter.AddOrUpdate(new LibraryOptions(libraryDirectory, keep), name, icoPath, "ImageToIcon", log);
 
-        if (!string.Equals(Path.GetFullPath(libraryDirectory), Path.GetFullPath(LibraryPaths.DefaultDirectory), StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("Elevated updates are only supported for the default library directory.");
+        if (!string.Equals(Path.GetFullPath(libraryDirectory), Path.GetFullPath(LibraryPaths.SystemDirectory), StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Elevated updates are only supported for the system library directory (%ProgramData%\\ImageToIcon).");
 
         return LibraryJob.Elevate(workspace, new LibraryJobSpec
         {

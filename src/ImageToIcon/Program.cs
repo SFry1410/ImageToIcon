@@ -225,7 +225,7 @@ public static class Program
     private static string ResolveLibraryDirectory(string? value)
     {
         return string.IsNullOrWhiteSpace(value)
-            ? LibraryPaths.DefaultDirectory
+            ? LibraryPaths.PerUserDirectory
             : Path.GetFullPath(value.Trim('"'));
     }
 
@@ -402,7 +402,8 @@ public static class Program
                              --stroke=#RGBA,width[,offset]  Stroke (width fraction, offset 0..1).
                              --shadow-no-bg                 Shadow ignores background (only with --bg).
                              --stroke-no-bg                 Stroke ignores background (only with --bg).
-                             --library[=DIR]               Save into the icon library DLL (default %ProgramData%\ImageToIcon).
+                             --library[=DIR]               Save into the icon library DLL (default %LocalAppData%\ImageToIcon\Library).
+                                                           --elevate only works with %ProgramData%\ImageToIcon.
                              --library-keep=N              Old library versions to keep (1..100, default 5).
                              --elevate                     Update the default library with administrator rights.
                              --mac                         Also write a .icns (standard Mac sizes).

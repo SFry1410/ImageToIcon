@@ -100,6 +100,8 @@ public partial class MainWindow : Window
     private string? _sourceName;
     private CheckBox _libraryCheck = null!;
     private CheckBox _macCheck = null!;
+    private StackPanel _libraryPathRow = null!;
+    private TextBlock _libraryPathText = null!;
     private const int LibraryKeep = 5;
     private bool _suppressTopFrameSync;
     private TrayIcon? _trayIcon;
@@ -145,6 +147,12 @@ public partial class MainWindow : Window
         _libraryCheck.IsVisible = OperatingSystem.IsWindows();
         _libraryCheck.IsChecked = OperatingSystem.IsWindows() && _settings.LibraryEnabled;
         _macCheck.IsChecked = _settings.MacExport;
+        _libraryPathRow = this.FindControl<StackPanel>("LibraryPathRow")!;
+        _libraryPathText = this.FindControl<TextBlock>("LibraryPathText")!;
+        _libraryPathRow.IsVisible = OperatingSystem.IsWindows();
+        this.FindControl<Button>("LibraryPathBtn")!.Click += async (_, _) => await ChooseLibraryFolderAsync();
+        this.FindControl<Button>("LibraryResetBtn")!.Click += (_, _) => ResetLibraryFolder();
+        RefreshLibraryPathText();
         var bgColorToggle = this.FindControl<Button>("BgColorToggle")!;
         _bgColorToggleCtrl = bgColorToggle;
         bgColorToggle.Click += (_, _) => ShowBackgroundColorFlyout();
@@ -1509,23 +1517,33 @@ public partial class MainWindow : Window
         var images = BuildSelectedImages();
         try
         {
+            var folder = EffectiveLibraryDirectory;
             LibraryEntryResult result;
             try
             {
-                result = LibraryExport.SaveFrames(images, LibraryPaths.DefaultDirectory, baseName, LibraryKeep, elevate: false, NullLog.Instance);
+                result = LibraryExport.SaveFrames(images, folder, baseName, LibraryKeep, elevate: false, NullLog.Instance);
             }
             catch (LibraryAccessDeniedException)
             {
+                // Only the system folder can be written with administrator rights. Any other folder
+                // is one the user picked, so the fix is to choose a folder they can write to.
+                if (!IsSystemLibraryFolder(folder))
+                {
+                    await ShowMessageAsync("No write access",
+                        $"You do not have permission to write to:\n{folder}\n\nChoose a different folder with \"Choose folder…\".");
+                    return;
+                }
+
                 var proceed = await ConfirmDialog.ShowAsync(
                     this,
                     "Administrator rights required",
-                    "The icon library can only be changed by administrators. Continue with administrator rights? Windows will ask you to confirm.",
+                    "The shared icon library (ProgramData) can only be changed by administrators. Continue with administrator rights? Windows will ask you to confirm.",
                     "Continue",
                     "Cancel");
                 if (!proceed)
                     return;
 
-                result = LibraryExport.SaveFrames(images, LibraryPaths.DefaultDirectory, baseName, LibraryKeep, elevate: true, NullLog.Instance);
+                result = LibraryExport.SaveFrames(images, folder, baseName, LibraryKeep, elevate: true, NullLog.Instance);
             }
 
             await ShowMessageAsync("Saved to icon library",
@@ -1541,6 +1559,45 @@ public partial class MainWindow : Window
             foreach (var img in images)
                 img.Dispose();
         }
+    }
+
+    /// Folder the library DLL is written to: the user's choice, or the private per-user default.
+    private string EffectiveLibraryDirectory =>
+        string.IsNullOrWhiteSpace(_settings.LibraryPath) ? LibraryPaths.PerUserDirectory : _settings.LibraryPath;
+
+    private static bool IsSystemLibraryFolder(string folder)
+    {
+        return string.Equals(
+            Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar),
+            Path.GetFullPath(LibraryPaths.SystemDirectory).TrimEnd(Path.DirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void RefreshLibraryPathText()
+    {
+        _libraryPathText.Text = EffectiveLibraryDirectory;
+    }
+
+    private async Task ChooseLibraryFolderAsync()
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Choose the folder for the icon library (Icons.dll)",
+            AllowMultiple = false
+        });
+        if (folders.Count == 0)
+            return;
+
+        _settings.LibraryPath = folders[0].Path.LocalPath;
+        _settings.Save();
+        RefreshLibraryPathText();
+    }
+
+    private void ResetLibraryFolder()
+    {
+        _settings.LibraryPath = "";
+        _settings.Save();
+        RefreshLibraryPathText();
     }
 
     private List<SKBitmap> BuildSelectedImages()
