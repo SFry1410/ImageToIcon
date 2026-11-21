@@ -514,6 +514,12 @@
                 <Button x:Name="SaveBtn" Content="Save Icon" Width="120"
                         HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
             </StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="16">
+                <CheckBox x:Name="LibraryCheck" Content="Save to icon library" IsVisible="False"
+                          ToolTip.Tip="Store the icon in the system-wide icon library DLL (Windows). Writing requires administrator rights; you will be asked to confirm each time." />
+                <CheckBox x:Name="MacCheck" Content="Also export .icns (Mac)"
+                          ToolTip.Tip="Also write a .icns file with the standard Mac sizes into a folder you choose." />
+            </StackPanel>
         </StackPanel>
 
     </Grid>

@@ -23,6 +23,8 @@ public class Settings
     public uint StrokeColor { get; set; } = 0x80000000;
     public double StrokeWidth { get; set; } = 0.01;
     public double StrokeOffset { get; set; }
+    public bool LibraryEnabled { get; set; }
+    public bool MacExport { get; set; }
     public DateTime LastUpdateCheckUtc { get; set; }
     public string PendingUpdateVersion { get; set; } = "";
 
@@ -97,6 +99,12 @@ public class Settings
 
             if (ShowThumbBorders != def.ShowThumbBorders)
                 w.WriteBoolean(nameof(ShowThumbBorders), ShowThumbBorders);
+
+            if (LibraryEnabled != def.LibraryEnabled)
+                w.WriteBoolean(nameof(LibraryEnabled), LibraryEnabled);
+
+            if (MacExport != def.MacExport)
+                w.WriteBoolean(nameof(MacExport), MacExport);
 
             WriteDouble(w, nameof(CornerRadius), CornerRadius, def.CornerRadius);
             WriteDouble(w, nameof(Padding), Padding, def.Padding, 3);

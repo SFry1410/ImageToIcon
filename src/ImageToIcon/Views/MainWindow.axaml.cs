@@ -15,6 +15,7 @@ using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using ImageToIcon.Library;
 using ImageToIcon.Models;
 using ImageToIcon.Platform;
 using ImageToIcon.Services;
@@ -97,6 +98,9 @@ public partial class MainWindow : Window
     private bool _sourceHasTransparency;
     private SKBitmap? _sourceImage;
     private string? _sourceName;
+    private CheckBox _libraryCheck = null!;
+    private CheckBox _macCheck = null!;
+    private const int LibraryKeep = 5;
     private bool _suppressTopFrameSync;
     private TrayIcon? _trayIcon;
 
@@ -136,6 +140,11 @@ public partial class MainWindow : Window
         var toggles = this.FindControl<ItemsControl>("SizeToggles")!;
         var borderToggle = this.FindControl<ToggleButton>("BorderToggle")!;
         borderToggle.IsChecked = _settings.ShowThumbBorders;
+        _libraryCheck = this.FindControl<CheckBox>("LibraryCheck")!;
+        _macCheck = this.FindControl<CheckBox>("MacCheck")!;
+        _libraryCheck.IsVisible = OperatingSystem.IsWindows();
+        _libraryCheck.IsChecked = OperatingSystem.IsWindows() && _settings.LibraryEnabled;
+        _macCheck.IsChecked = _settings.MacExport;
         var bgColorToggle = this.FindControl<Button>("BgColorToggle")!;
         _bgColorToggleCtrl = bgColorToggle;
         bgColorToggle.Click += (_, _) => ShowBackgroundColorFlyout();
@@ -431,6 +440,8 @@ public partial class MainWindow : Window
             _settings.HicolorSelectedSizes = _hicolorToggles.Where(t => t.IsChecked).Select(t => t.Size).ToArray();
             _settings.IcnsSelectedSizes = _icnsToggles.Where(t => t.IsChecked).Select(t => t.Size).ToArray();
             _settings.ShowThumbBorders = borderToggle.IsChecked == true;
+            _settings.LibraryEnabled = _libraryCheck.IsChecked == true;
+            _settings.MacExport = _macCheck.IsChecked == true;
             var fx = _savedFxState ?? _fxState;
             _settings.ShadowColor = fx.ShadowColor.ToUInt32();
             _settings.ShadowOffsetX = fx.ShadowOffsetX;
@@ -1469,6 +1480,143 @@ public partial class MainWindow : Window
     }
 
     private async Task SaveIconAsync()
+    {
+        if (_topThumbs.Count == 0 && _smallThumbs.Count == 0)
+            return;
+
+        if (_libraryCheck.IsChecked == true && OperatingSystem.IsWindows())
+            await SaveToLibraryAsync();
+        else
+            await SaveFileAsync();
+
+        if (_macCheck.IsChecked == true)
+            await ExportMacAsync();
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private async Task SaveToLibraryAsync()
+    {
+        try
+        {
+            await _rebuildChain;
+        }
+        catch
+        {
+            // ignored
+        }
+
+        var baseName = _sourceName ?? "icon";
+        var images = BuildSelectedImages();
+        try
+        {
+            LibraryEntryResult result;
+            try
+            {
+                result = LibraryExport.SaveFrames(images, LibraryPaths.DefaultDirectory, baseName, LibraryKeep, elevate: false, NullLog.Instance);
+            }
+            catch (LibraryAccessDeniedException)
+            {
+                var proceed = await ConfirmDialog.ShowAsync(
+                    this,
+                    "Administrator rights required",
+                    "The icon library can only be changed by administrators. Continue with administrator rights? Windows will ask you to confirm.",
+                    "Continue",
+                    "Cancel");
+                if (!proceed)
+                    return;
+
+                result = LibraryExport.SaveFrames(images, LibraryPaths.DefaultDirectory, baseName, LibraryKeep, elevate: true, NullLog.Instance);
+            }
+
+            await ShowMessageAsync("Saved to icon library",
+                $"{result.ReferenceById}\n{result.ReferenceByIndex}" +
+                (result.UsedVersionedFile ? "\n\nIcons.dll was in use; the new version is stored as a versioned file." : string.Empty));
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Error", ex.Message);
+        }
+        finally
+        {
+            foreach (var img in images)
+                img.Dispose();
+        }
+    }
+
+    private List<SKBitmap> BuildSelectedImages()
+    {
+        var ordered = _topThumbs.Concat(_smallThumbs)
+                                .OrderByDescending(t => t.Size)
+                                .ToList();
+        var images = new List<SKBitmap>(ordered.Count);
+        foreach (var t in ordered)
+        {
+            if (t.Source != null)
+            {
+                images.Add(IconFactory.Copy(t.Source));
+                continue;
+            }
+
+            var src = SourceFor(t);
+            if (src != null)
+                images.Add(IconFactory.ResizePadded(src, t.Size, MaskFor(t), PaddingFor(t), FitModeFor(t), CropXFor(t), CropYFor(t), ZoomFor(t), _bgTestingMode ? null : _backgroundColor, _fxState.Shadow, _fxState.Stroke, !_bgTestingMode && _fxState.ShadowIncludesBackground, !_bgTestingMode && _fxState.StrokeIncludesBackground));
+        }
+
+        return images;
+    }
+
+    /// Writes the standard .icns sizes from the main source image into a folder the user picks.
+    private async Task ExportMacAsync()
+    {
+        if (_sourceImage == null)
+            return;
+
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Choose folder for the .icns file",
+            AllowMultiple = false
+        });
+        if (folders.Count == 0)
+            return;
+
+        var baseName = _sourceName ?? "icon";
+        var frames = new List<SKBitmap>();
+        try
+        {
+            foreach (var size in Settings.DefaultIcnsSizes)
+            {
+                frames.Add(IconFactory.ResizePadded(_sourceImage, size, EffectiveMask, EffectivePadding, _fitMode, _cropOffsetX, _cropOffsetY, _cropZoom, _bgTestingMode ? null : _backgroundColor, _fxState.Shadow, _fxState.Stroke, !_bgTestingMode && _fxState.ShadowIncludesBackground, !_bgTestingMode && _fxState.StrokeIncludesBackground));
+            }
+
+            var path = Path.Combine(folders[0].Path.LocalPath, baseName + ".icns");
+            IconFactory.SaveIcns(frames, path);
+            await ShowMessageAsync("Mac icon saved", path);
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Error", ex.Message);
+        }
+        finally
+        {
+            foreach (var f in frames)
+                f.Dispose();
+        }
+    }
+
+    private async Task ShowMessageAsync(string title, string text)
+    {
+        var dlg = new Window
+        {
+            Title = title,
+            Width = 460,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            Content = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(12) }
+        };
+        await dlg.ShowDialog(this);
+    }
+
+    private async Task SaveFileAsync()
     {
         if (_topThumbs.Count == 0 && _smallThumbs.Count == 0)
             return;

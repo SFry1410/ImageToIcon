@@ -81,7 +81,63 @@ Run `ImageToIcon --help` to see the full list of options, including format, corn
 | `--stroke=#RGBA,width[,offset]` | Stroke — width fraction, offset 0..1. |
 | `--shadow-no-bg` | Shadow ignores background (only with `--bg`). |
 | `--stroke-no-bg` | Stroke ignores background (only with `--bg`). |
+| `--library[=DIR]` | Save into the icon library DLL (Windows). Default `%ProgramData%\ImageToIcon`. See [Icon library](#icon-library). |
+| `--library-keep=N` | Number of old library versions to keep, `1`–`100` (default `5`). |
+| `--elevate` | Update the default library with administrator rights (Windows will ask for confirmation). |
+| `--mac` | Also write a `.icns` with the standard Mac sizes. |
+| `--mac-out=DIR` | Output folder for `--mac` (default: `<o>\mac`). |
 | `--help` | Show usage information. |
+
+---
+
+## Icon library
+
+`--library` stores icons as resources inside one DLL instead of loose files. Explorer, shortcuts and other programs can then reference an icon by file and ID.
+
+```bash
+ImageToIcon --cli --library --name=app logo.png
+ImageToIcon --cli --library=C:\Icons --name=app logo.png
+ImageToIcon --cli --library --elevate --name=app logo.png
+```
+
+Each run prints two references:
+
+- `C:\ProgramData\ImageToIcon\Icons.dll,-1` — by resource ID. **Use this.** It stays valid when other icons are added or updated.
+- `C:\ProgramData\ImageToIcon\Icons.dll,0` — by position. Only valid while no icon is removed from the library.
+
+To use one in a shortcut, set `IconLocation` to the ID form.
+
+### Files
+
+| File | Purpose |
+| --- | --- |
+| `Icons.dll` | Stable name of the active library. Always the newest version. |
+| `Icons.vNNNN.dll` | Previous versions (backups). The newest `--library-keep` are kept. |
+| `Icons.index.json` | Icon names, resource IDs, sizes, source and time of the last update. |
+
+A name that is updated again keeps its ID, and its old frames are replaced. Different names get different IDs.
+
+### Updates and versioning
+
+Updates never patch the active file in place. A copy is written, verified by loading it as a data file, and then swapped in. If Windows refuses to replace `Icons.dll` (for example, Explorer still holds it), the new version is stored as `Icons.vNNNN.dll` and the index points at it. References that name `Icons.dll` then still point to the old file, so use the reference the tool prints for that update.
+
+Only one update runs at a time (a named mutex). A corrupt `Icons.index.json` is moved aside as `*.corrupt` and a new index is started; the icons in the DLL are kept.
+
+### Permissions
+
+The default directory `%ProgramData%\ImageToIcon` is readable by every account and writable only by administrators. Standard users can therefore load the icons but cannot change them without `--elevate`. The GUI asks for confirmation before it elevates.
+
+`--elevate` only works for the default directory. The elevated helper runs as the account that confirms the UAC prompt and accepts only job files inside its own temp workspace.
+
+A user-chosen `--library=DIR` keeps the normal permissions of that folder.
+
+### Temporary files
+
+Intermediate `.ico` files are created in `%TEMP%\ImageToIcon-ws-<id>` and removed after each run, also when an error occurs. Workspaces left behind by a crash are removed at the next start, but only if they carry the workspace marker and the process that created them is gone or they are older than 24 hours.
+
+## Mac
+
+`--mac` (or the checkbox in the GUI) writes a `.icns` with the standard Mac sizes (16–1024 px). In the GUI, you choose the output folder when you save.
 
 ---
 
