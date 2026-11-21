@@ -1,3 +1,4 @@
+using ImageToIcon.Library;
 using ImageToIcon.Services;
 using Xunit;
 
@@ -44,7 +45,9 @@ public class LibraryJobTests
         using var outside = new ScratchDir();
         try
         {
-            File.WriteAllText(Path.Combine(dir, ".imagetoicon-workspace"), "1 2000-01-01T00:00:00Z");
+            // A live marker (this process, now). An old or dead marker would let the parallel stale-workspace
+            // cleaner remove the folder before the assertion runs.
+            File.WriteAllText(Path.Combine(dir, TempWorkspace.MarkerName), $"{Environment.ProcessId} {DateTime.UtcNow:O}");
             var icon = Path.Combine(outside.Path, "icon.ico");
             File.WriteAllBytes(icon, IcoBuilder.Standard());
             var job = Path.Combine(dir, "job.json");
