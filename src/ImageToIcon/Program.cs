@@ -1,5 +1,6 @@
 using System.Globalization;
 using Avalonia;
+using ImageToIcon.Library;
 using ImageToIcon.Services;
 using ImageToIcon.Views;
 using SkiaSharp;
@@ -11,6 +12,16 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // Elevated helper started by the library update; never shows UI.
+        var jobArg = args.FirstOrDefault(a => a.StartsWith(LibraryJobArgs.Switch, StringComparison.Ordinal));
+        if (jobArg != null)
+            return OperatingSystem.IsWindows()
+                ? LibraryJob.Run(jobArg[LibraryJobArgs.Switch.Length..].Trim('"'))
+                : 1;
+
+        // Remove temp workspaces left behind by crashed runs; a no-op when there are none.
+        StaleWorkspaceCleaner.Clean();
+
         if (args.Any(a => a is "--cli" or "--help"))
             return RunCli(args);
 
@@ -35,19 +46,39 @@ public static class Program
         }
 
         var outDir = GetNamed(args, "o");
-        if (string.IsNullOrWhiteSpace(outDir))
+        var libraryRequested = HasOption(args, "library");
+        if (libraryRequested && !OperatingSystem.IsWindows())
+            return Fail("--library is only available on Windows.");
+        var macRequested = HasFlag(args, "mac") || HasOption(args, "mac-out");
+        if (string.IsNullOrWhiteSpace(outDir) && !libraryRequested && !macRequested)
         {
             Console.WriteLine("Error: Missing output path.");
             PrintHelp();
             return 1;
         }
 
-        outDir = outDir.Trim('"');
-        if (!Directory.Exists(outDir))
+        if (!string.IsNullOrWhiteSpace(outDir))
         {
-            Console.WriteLine($"Error: Output path '{outDir}' does not exist.");
-            return 1;
+            outDir = outDir.Trim('"');
+            if (!Directory.Exists(outDir))
+            {
+                Console.WriteLine($"Error: Output path '{outDir}' does not exist.");
+                return 1;
+            }
         }
+        else
+        {
+            outDir = null;
+        }
+
+        var libraryDir = ResolveLibraryDirectory(GetNamed(args, "library"));
+        var elevate = HasFlag(args, "elevate");
+        var keep = 5;
+        var keepArg = GetNamed(args, "library-keep");
+        if (keepArg != null && (!int.TryParse(keepArg, NumberStyles.None, CultureInfo.InvariantCulture, out keep) || keep is < 1 or > 100))
+            return Fail("Invalid --library-keep value (1..100).");
+        var macDir = ResolveMacDirectory(GetNamed(args, "mac-out"), outDir);
+        var log = new ConsoleLog();
 
         var format = ParseFormat(GetNamed(args, "format"));
         var hicolorArchive = HasFlag(args, "hicolor-archive");
@@ -102,27 +133,57 @@ public static class Program
             }
 
             var frames = IconFactory.BuildSizes(img, sizes, corner, padding, fit.Value, 0, 0, 1, bg, shadow, stroke, shadowWithBg, strokeWithBg).ToList();
+            var baseName = nameOverride ?? Path.GetFileNameWithoutExtension(file);
             try
             {
-                var outPath = ResolveOutputPath(outDir, file, format, hicolorArchive, nameOverride);
-                switch (format)
+                if (outDir != null)
                 {
-                    case IconFormat.Ico:
-                        IconFactory.Save(frames, outPath);
-                        break;
-                    case IconFormat.Icns:
-                        IconFactory.SaveIcns(frames, outPath);
-                        break;
-                    case IconFormat.Hicolor:
-                        var baseName = nameOverride ?? Path.GetFileNameWithoutExtension(file);
-                        if (hicolorArchive)
-                            IconFactory.SaveHicolorArchive(frames, outPath, baseName);
-                        else
-                            IconFactory.SaveHicolorFolder(frames, outPath, baseName);
-                        break;
+                    var outPath = ResolveOutputPath(outDir, file, format, hicolorArchive, nameOverride);
+                    switch (format)
+                    {
+                        case IconFormat.Ico:
+                            IconFactory.Save(frames, outPath);
+                            break;
+                        case IconFormat.Icns:
+                            IconFactory.SaveIcns(frames, outPath);
+                            break;
+                        case IconFormat.Hicolor:
+                            if (hicolorArchive)
+                                IconFactory.SaveHicolorArchive(frames, outPath, baseName);
+                            else
+                                IconFactory.SaveHicolorFolder(frames, outPath, baseName);
+                            break;
+                    }
+
+                    Console.WriteLine($"Done: '{outPath}' saved.");
                 }
 
-                Console.WriteLine($"Done: '{outPath}' saved.");
+                if (libraryRequested)
+                {
+                    var entry = LibraryExport.SaveFrames(frames, libraryDir, baseName, keep, elevate, log);
+                    Console.WriteLine($"Library: '{entry.DllPath}' (group {entry.GroupId}, version {entry.Version}).");
+                    Console.WriteLine($"  Reference by ID:       {entry.ReferenceById}");
+                    Console.WriteLine($"  Reference by position: {entry.ReferenceByIndex}");
+                    if (entry.UsedVersionedFile)
+                        Console.WriteLine("  Note: Icons.dll is in use; the new version is referenced by its versioned file name.");
+                }
+
+                if (macRequested)
+                {
+                    // Mac always uses the standard .icns sizes; --sizes applies to ICO/hicolor only.
+                    var macFrames = IconFactory.BuildSizes(img, Settings.DefaultIcnsSizes, corner, padding, fit.Value, 0, 0, 1, bg, shadow, stroke, shadowWithBg, strokeWithBg).ToList();
+                    try
+                    {
+                        Directory.CreateDirectory(macDir);
+                        var macPath = Path.Combine(macDir, baseName + ".icns");
+                        IconFactory.SaveIcns(macFrames, macPath);
+                        Console.WriteLine($"Mac: '{macPath}' saved.");
+                    }
+                    finally
+                    {
+                        foreach (var f in macFrames) f.Dispose();
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -153,6 +214,26 @@ public static class Program
     private static bool HasFlag(string[] args, string name)
     {
         return args.Any(a => a == "--" + name);
+    }
+
+    /// True for "--name" and "--name=..." (the value may be empty).
+    private static bool HasOption(string[] args, string name)
+    {
+        return args.Any(a => a == "--" + name || a.StartsWith("--" + name + "=", StringComparison.Ordinal));
+    }
+
+    private static string ResolveLibraryDirectory(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? LibraryPaths.DefaultDirectory
+            : Path.GetFullPath(value.Trim('"'));
+    }
+
+    private static string ResolveMacDirectory(string? value, string? outDir)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+            return Path.GetFullPath(value.Trim('"'));
+        return Path.Combine(outDir ?? Environment.CurrentDirectory, "mac");
     }
 
     private static int[]? ParseSizes(string[] args)
@@ -321,6 +402,11 @@ public static class Program
                              --stroke=#RGBA,width[,offset]  Stroke (width fraction, offset 0..1).
                              --shadow-no-bg                 Shadow ignores background (only with --bg).
                              --stroke-no-bg                 Stroke ignores background (only with --bg).
+                             --library[=DIR]               Save into the icon library DLL (default %ProgramData%\ImageToIcon).
+                             --library-keep=N              Old library versions to keep (1..100, default 5).
+                             --elevate                     Update the default library with administrator rights.
+                             --mac                         Also write a .icns (standard Mac sizes).
+                             --mac-out=DIR                 Output folder for --mac (default: <o>\mac).
                              --help                         Show this help.
 
                            Default ICO sizes:      {string.Join(", ", IconFactory.DefaultSizes)}
